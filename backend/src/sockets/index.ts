@@ -40,8 +40,10 @@ export function initSockets(httpServer: HttpServer) {
     // Missed-event catchup: fetched from the DB every time, per the spec -
     // never served out of an in-memory buffer that would be empty after a
     // server restart.
-    const catchup = await getRecentActivityForUser(userId, role);
-    socket.emit("activity:catchup", catchup);
+     socket.on("activity:catchup", async (ack: (events: unknown) => void) => {
+      const events = await getRecentActivityForUser(userId, role);
+      ack(events);
+    });
 
     socket.on("project:join", async (projectId: string) => {
       const allowed = await canAccessProject(userId, role, projectId);

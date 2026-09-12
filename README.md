@@ -63,9 +63,8 @@ npm run dev              # http://localhost:5173
 
 ## Database schema
 
-```
 User (id, email, passwordHash, name, role, createdAt)
-  role: ADMIN | PM | DEVELOPER
+role: ADMIN | PM | DEVELOPER
 
 RefreshToken (id, userId -> User, expiresAt, revokedAt, createdAt)
 
@@ -74,16 +73,16 @@ Client (id, name, contactEmail, createdAt)
 Project (id, name, description, clientId -> Client, managerId -> User, createdAt)
 
 Task (id, title, description, projectId -> Project, assigneeId -> User,
-      status, priority, dueDate, isOverdue, createdAt, updatedAt)
-  status:   TODO | IN_PROGRESS | IN_REVIEW | DONE
-  priority: LOW | MEDIUM | HIGH | CRITICAL
+status, priority, dueDate, isOverdue, createdAt, updatedAt)
+status: TODO | IN_PROGRESS | IN_REVIEW | DONE
+priority: LOW | MEDIUM | HIGH | CRITICAL
 
 ActivityLog (id, taskId -> Task, projectId -> Project, userId -> User,
-             fromStatus, toStatus, createdAt)
+fromStatus, toStatus, createdAt)
 
 Notification (id, userId -> User, type, message, relatedTaskId -> Task,
-              isRead, createdAt)
-```
+isRead, createdAt)
+
 
 **Indexing decisions**
 
@@ -108,6 +107,20 @@ Notification (id, userId -> User, type, message, relatedTaskId -> Task,
   of joining through `Task` on every row.
 
 ## Architectural decisions
+
+**Backend framework: Express, not Fastify.** Fastify's edge (schema-based
+validation and serialization built into the routing layer, lower request
+overhead) matters most at high request volume; this app's load is an
+internal agency tool with a handful of concurrent users; not a
+high-throughput public API. Express's tradeoff is the opposite one: a
+smaller, more universally understood API and the largest middleware
+ecosystem, which matters more here because the two things this backend
+does that aren't plain REST — cookie-based refresh tokens and a Socket.io
+server sharing the same HTTP server instance — both have the most
+battle-tested middleware and examples built against Express. Validation is
+handled explicitly with zod (`middleware/validate.ts`) rather than relying
+on a framework feature, so Fastify's built-in schema validation wouldn't
+have saved much here anyway.
 
 **WebSocket library: Socket.io, not a raw `ws` server.** The spec requires
 room-scoped delivery (per-project viewers, per-role feeds, per-user
@@ -147,11 +160,24 @@ task gets a 404 (not a 403 — the resource is made to look like it doesn't
 exist, so scope isn't leaked by contrasting error codes), because
 `getTaskOrThrow` checks `assigneeId` before returning anything.
 
-**Missed-event catchup.** On every socket connection the server queries
-`ActivityLog` for that user's role-scoped last 20 events and emits them as
-one `activity:catchup` event, before anything live arrives. Nothing is
-buffered in memory — a restarted server or a user who was offline for two
-days gets the same DB-backed answer.
+**Missed-event catchup.** The client requests this explicitly over the
+socket (an `activity:catchup` emit with an ack callback) once its own
+listeners are registered, rather than the server pushing it the instant
+the connection opens — a push sent that early can arrive before the
+client's listener is attached and be silently dropped, since Socket.io
+doesn't buffer application events for a not-yet-registered handler. Every
+request is answered from `ActivityLog`, scoped to that user's role, never
+served out of an in-memory buffer that would be empty after a server
+restart or a two-day absence.
+
+## Deployment note
+
+The brief asks for the application to be hosted on Vercel. Vercel's
+serverless functions can't hold a persistent WebSocket connection open, so
+this backend (Socket.io on a long-running Node process) can't run there.
+The frontend is deployed to Vercel as specified; the backend + Postgres are
+deployed to Railway, which supports long-lived connections. This is a
+deliberate consequence of the WebSocket requirement, not an oversight.
 
 ## Known limitations
 

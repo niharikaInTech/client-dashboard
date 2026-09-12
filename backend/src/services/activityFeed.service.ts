@@ -76,12 +76,9 @@ export async function recordStatusChange(params: {
   const event = toEvent(row);
   const io = getIO();
 
-  io.to(rooms.project(params.projectId)).emit("activity:new", event);
-  io.to(rooms.adminGlobal).emit("activity:new", event);
-  io.to(rooms.pmProjects(params.projectManagerId)).emit("activity:new", event);
-  if (params.assigneeId) {
-    io.to(rooms.user(params.assigneeId)).emit("activity:new", event);
-  }
+ const targetRooms = [rooms.project(params.projectId), rooms.adminGlobal, rooms.pmProjects(params.projectManagerId)];
+  if (params.assigneeId) targetRooms.push(rooms.user(params.assigneeId));
+  io.to(targetRooms).emit("activity:new", event);
 
   return event;
 }

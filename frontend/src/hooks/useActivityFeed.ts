@@ -29,12 +29,9 @@ export function useActivityFeed(projectId?: string) {
   useEffect(() => {
     if (!socket) return;
 
-    if (!projectId) {
-      const onCatchup = (payload: ActivityEvent[]) => setEvents(payload);
-      socket.on("activity:catchup", onCatchup);
-      return () => {
-        socket.off("activity:catchup", onCatchup);
-      };
+       if (!projectId) {
+      socket.emit("activity:catchup", (payload: ActivityEvent[]) => setEvents(payload));
+      return;
     }
 
     socket.emit("project:join", projectId);
