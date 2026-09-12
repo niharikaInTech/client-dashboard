@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PM
+  DEVELOPER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_IN_REVIEW
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  projectsManaged Project[]      @relation("ProjectManager")
+  tasksAssigned   Task[]         @relation("TaskAssignee")
+  activityLogs    ActivityLog[]
+  notifications   Notification[]
+  refreshTokens   RefreshToken[]
+
+  @@index([role])
+}
+
+// One row per issued refresh token so a single device/session can be revoked
+// without invalidating every other session for the user (rotation on refresh).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  name         String
+  contactEmail String?
+  createdAt    DateTime @default(now())
+
+  projects Project[]
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  managerId   String
+  manager     User     @relation("ProjectManager", fields: [managerId], references: [id])
+  createdAt   DateTime @default(now())
+
+  tasks         Task[]
+  activityLogs  ActivityLog[]
+
+  // Every PM-scoped query ("projects I manage") filters on managerId, and
+  // client detail pages filter on clientId.
+  @@index([managerId])
+  @@index([clientId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeId  String?
+  assignee    User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  status      TaskStatus @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  dueDate     DateTime?
+  isOverdue   Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  activityLogs  ActivityLog[]
+  notifications Notification[]
+
+  // projectId: task list per project. assigneeId: a developer's own task list
+  // and the overdue cron's "tasks assigned to X" lookups.
+  // [assigneeId, priority] backs "developer dashboard sorted by priority
+  // then due date" without a full table scan.
+  // status / dueDate are indexed because filters and the overdue sweep both
+  // query on them directly.
+  @@index([projectId])
+  @@index([assigneeId, priority])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// Append-only log. Denormalizing projectId onto the row (instead of only
+// reaching it through task.project) lets the project feed and the admin
+// global feed both query ActivityLog directly with a single indexed scan
+// instead of a join through Task for every row.
+model ActivityLog {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  fromStatus TaskStatus?
+  toStatus   TaskStatus
+  createdAt  DateTime @default(now())
+
+  // Feed queries are always "latest N for scope X" so createdAt is paired
+  // with the scoping column in a composite index rather than indexed alone.
+  @@index([projectId, createdAt])
+  @@index([taskId, createdAt])
+}
+
+model Notification {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type             NotificationType
+  message          String
+  relatedTaskId    String?
+  relatedTask      Task?            @relation(fields: [relatedTaskId], references: [id], onDelete: SetNull)
+  isRead           Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+
+  // The notification bell always asks "this user's unread, newest first" or
+  // "this user's last N" - both served by one composite index.
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
