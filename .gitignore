@@ -6,3 +6,4 @@ build/
 .DS_Store
 backend/prisma/dev.db
 frontend/dist/
+*.tsbuildinfo
