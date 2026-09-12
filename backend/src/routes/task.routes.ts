@@ -219,7 +219,9 @@ router.patch(
       toStatus: status,
     });
 
-    if (status === "IN_REVIEW") {
+    // Skip the notification when the PM is the one who made the change -
+    // they don't need to be told about their own action.
+    if (status === "IN_REVIEW" && req.user!.id !== existing.project.managerId) {
       await notifyTaskInReview(existing.project.managerId, updated.title, updated.id);
     }
 
