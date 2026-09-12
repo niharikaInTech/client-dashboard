@@ -17,7 +17,20 @@ import dashboardRoutes from "./routes/dashboard.routes";
 
 const app = express();
 
-app.use(cors({ origin: env.clientOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      const allowed =
+        origin === env.clientOrigin ||
+        origin.endsWith(".vercel.app");
+
+      callback(allowed ? null : new Error("Not allowed by CORS"), allowed);
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 
